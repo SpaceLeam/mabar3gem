@@ -199,24 +199,6 @@
                 }
             };
             
-            const leaveRoom = () => {
-                socket.emit('leave_room', { room_id: roomId });
-                setInRoom(false);
-                setRoomId('');
-                setPlayers([]);
-                setScores({});
-                setRoomOwner('');
-                setActivityLog([]);
-                setLoveLog([]);
-                setFortuneLog([]);
-                setLoveResult(null);
-                setFortune(null);
-                setDiceResults([]);
-                setShowLoveResult(false);
-                setShowFortune(false);
-                setShowDice(false);
-            };
-            
             if (!inRoom) {
                 return (
                     <div className="max-w-md mx-auto mt-10 p-4">
@@ -282,22 +264,14 @@
                                 <span className="text-[#8b949e]">Players:</span>
                                 <span className="text-white ml-1">{players.length}/10</span>
                             </div>
-                            <div className="flex gap-2">
-                                {guestName === roomOwner && (
-                                    <button
-                                        onClick={resetGame}
-                                        className="bg-[#da3633] hover:bg-[#f85149] text-white px-3 py-1 rounded transition text-xs font-semibold"
-                                    >
-                                        Reset
-                                    </button>
-                                )}
+                            {guestName === roomOwner && (
                                 <button
-                                    onClick={leaveRoom}
-                                    className="bg-[#21262d] hover:bg-[#30363d] text-white px-3 py-1 rounded transition text-xs font-semibold"
+                                    onClick={resetGame}
+                                    className="bg-[#da3633] hover:bg-[#f85149] text-white px-3 py-1 rounded transition text-xs font-semibold"
                                 >
-                                    Leave
+                                    Reset
                                 </button>
-                            </div>
+                            )}
                         </div>
                     </div>
                     

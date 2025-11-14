@@ -225,41 +225,6 @@ def handle_disconnect():
     del guests[session_id]
     print(f"[DISCONNECT] {guest_name} disconnected. Total guests: {len(guests)}")
 
-@socketio.on('leave_room')
-def handle_leave_room(data):
-    session_id = request.sid
-    
-    if session_id not in guests:
-        return
-    
-    guest_name = guests[session_id]['name']
-    room_id = data.get('room_id')
-    
-    if not room_id or room_id not in rooms:
-        return
-    
-    # Remove from room
-    if guest_name in rooms[room_id]['players']:
-        rooms[room_id]['players'].remove(guest_name)
-    if guest_name in rooms[room_id]['scores']:
-        del rooms[room_id]['scores'][guest_name]
-    
-    # Update guest data
-    guests[session_id]['room_id'] = None
-    leave_room(room_id)
-    
-    # Delete room if empty
-    if len(rooms[room_id]['players']) == 0:
-        del rooms[room_id]
-        print(f"[LEAVE] {guest_name} left, room {room_id} deleted (empty)")
-    else:
-        emit('player_left', {
-            'players': rooms[room_id]['players'],
-            'scores': rooms[room_id]['scores']
-        }, room=room_id)
-        print(f"[LEAVE] {guest_name} left room {room_id}")
-
-
 # Game: Love Calculator
 @socketio.on('love_calculate')
 def handle_love_calculate(data):
