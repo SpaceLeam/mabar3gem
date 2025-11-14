@@ -88,16 +88,24 @@
                     setInRoom(true);
                     setPlayers(data.players);
                     setRoomOwner(data.players[0]);
+                    setScores({[data.players[0]]: 0});
                 });
                 
                 socket.on('player_joined', (data) => {
                     setPlayers(data.players);
                     setScores(data.scores);
+                    setInRoom(true);  // INI YANG PENTING
+                    if (data.players.length > 0) {
+                        setRoomOwner(data.players[0]);
+                    }
                 });
                 
                 socket.on('player_left', (data) => {
                     setPlayers(data.players);
                     setScores(data.scores);
+                    if (data.players.length > 0) {
+                        setRoomOwner(data.players[0]);
+                    }
                 });
                 
                 socket.on('love_result', (data) => {
