@@ -27,7 +27,7 @@ ifconfig
 ```
 Note your IPv4 (example: 192.168.1.5)
 
-**Step 2:** Edit `templates/index.html` line 83
+**Step 2:** Edit `templates/index.html` line 53
 ```javascript
 // Change from
 const socket = io(`http://${window.location.hostname}:5000`);
