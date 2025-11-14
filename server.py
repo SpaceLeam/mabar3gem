@@ -225,9 +225,53 @@ def handle_disconnect():
     del guests[session_id]
     print(f"[DISCONNECT] {guest_name} disconnected. Total guests: {len(guests)}")
 
+@socketio.on('leave_room')
+def handle_leave_room(data):
+    session_id = request.sid
+    
+    if session_id not in guests:
+        return
+    
+    guest_name = guests[session_id]['name']
+    room_id = data.get('room_id')
+    
+    if not room_id or room_id not in rooms:
+        return
+    
+    # Remove from room
+    if guest_name in rooms[room_id]['players']:
+        rooms[room_id]['players'].remove(guest_name)
+    if guest_name in rooms[room_id]['scores']:
+        del rooms[room_id]['scores'][guest_name]
+    
+    # Update guest data
+    guests[session_id]['room_id'] = None
+    leave_room(room_id)
+    
+    # Delete room if empty
+    if len(rooms[room_id]['players']) == 0:
+        del rooms[room_id]
+        print(f"[LEAVE] {guest_name} left, room {room_id} deleted (empty)")
+    else:
+        emit('player_left', {
+            'players': rooms[room_id]['players'],
+            'scores': rooms[room_id]['scores']
+        }, room=room_id)
+        print(f"[LEAVE] {guest_name} left room {room_id}")
+
+
 # Game: Love Calculator
 @socketio.on('love_calculate')
 def handle_love_calculate(data):
+    session_id = request.sid
+    
+    if session_id not in guests:
+        emit('error', {'message': 'Session not found'})
+        return
+    
+    room_id = guests[session_id].get('room_id')
+    guest_name = guests[session_id]['name']
+    
     name1 = data.get('name1', '').strip()
     name2 = data.get('name2', '').strip()
     
@@ -237,15 +281,34 @@ def handle_love_calculate(data):
     
     score = calculate_love_score(name1, name2)
     
-    emit('love_result', {
-        'name1': name1,
-        'name2': name2,
-        'score': score
-    })
+    # Broadcast to all players in room
+    if room_id and room_id in rooms:
+        emit('love_result', {
+            'player': guest_name,
+            'name1': name1,
+            'name2': name2,
+            'score': score
+        }, room=room_id)
+    else:
+        emit('love_result', {
+            'player': guest_name,
+            'name1': name1,
+            'name2': name2,
+            'score': score
+        })
 
 # Game: Fortune Cookie
 @socketio.on('crack_cookie')
 def handle_crack_cookie():
+    session_id = request.sid
+    
+    if session_id not in guests:
+        emit('error', {'message': 'Session not found'})
+        return
+    
+    room_id = guests[session_id].get('room_id')
+    guest_name = guests[session_id]['name']
+    
     fortune = random.choice(fortune_cookies)
     
     # Determine category
@@ -257,10 +320,19 @@ def handle_crack_cookie():
     else:
         category = 'maybe'
     
-    emit('fortune_result', {
-        'fortune': fortune,
-        'category': category
-    })
+    # Broadcast to all players in room
+    if room_id and room_id in rooms:
+        emit('fortune_result', {
+            'player': guest_name,
+            'fortune': fortune,
+            'category': category
+        }, room=room_id)
+    else:
+        emit('fortune_result', {
+            'player': guest_name,
+            'fortune': fortune,
+            'category': category
+        })
 
 # Game: Dice Roller (Battle Mode)
 @socketio.on('roll_dice')

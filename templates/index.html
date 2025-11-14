@@ -94,7 +94,7 @@
                 socket.on('player_joined', (data) => {
                     setPlayers(data.players);
                     setScores(data.scores);
-                    setInRoom(true);  // INI YANG PENTING
+                    setInRoom(true);
                     if (data.players.length > 0) {
                         setRoomOwner(data.players[0]);
                     }
@@ -112,7 +112,7 @@
                     setLoveResult(data);
                     setShowLoveResult(true);
                     setLoveLog(prev => [{
-                        player: guestName,
+                        player: data.player,
                         name1: data.name1,
                         name2: data.name2,
                         score: data.score,
@@ -126,7 +126,7 @@
                         setShowFortune(true);
                         setIsCracking(false);
                         setFortuneLog(prev => [{
-                            player: guestName,
+                            player: data.player,
                             fortune: data.fortune,
                             category: data.category,
                             time: new Date().toLocaleTimeString()
@@ -199,6 +199,24 @@
                 }
             };
             
+            const leaveRoom = () => {
+                socket.emit('leave_room', { room_id: roomId });
+                setInRoom(false);
+                setRoomId('');
+                setPlayers([]);
+                setScores({});
+                setRoomOwner('');
+                setActivityLog([]);
+                setLoveLog([]);
+                setFortuneLog([]);
+                setLoveResult(null);
+                setFortune(null);
+                setDiceResults([]);
+                setShowLoveResult(false);
+                setShowFortune(false);
+                setShowDice(false);
+            };
+            
             if (!inRoom) {
                 return (
                     <div className="max-w-md mx-auto mt-10 p-4">
@@ -264,14 +282,22 @@
                                 <span className="text-[#8b949e]">Players:</span>
                                 <span className="text-white ml-1">{players.length}/10</span>
                             </div>
-                            {guestName === roomOwner && (
+                            <div className="flex gap-2">
+                                {guestName === roomOwner && (
+                                    <button
+                                        onClick={resetGame}
+                                        className="bg-[#da3633] hover:bg-[#f85149] text-white px-3 py-1 rounded transition text-xs font-semibold"
+                                    >
+                                        Reset
+                                    </button>
+                                )}
                                 <button
-                                    onClick={resetGame}
-                                    className="bg-[#da3633] hover:bg-[#f85149] text-white px-3 py-1 rounded transition text-xs font-semibold"
+                                    onClick={leaveRoom}
+                                    className="bg-[#21262d] hover:bg-[#30363d] text-white px-3 py-1 rounded transition text-xs font-semibold"
                                 >
-                                    Reset
+                                    Leave
                                 </button>
-                            )}
+                            </div>
                         </div>
                     </div>
                     
