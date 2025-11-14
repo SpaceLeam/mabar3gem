@@ -73,6 +73,22 @@ fortune_cookies = [
 def generate_room_id():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
+def generate_unique_guest_name():
+    """Generate unique guest name yang belum dipake"""
+    max_attempts = 1000
+    for _ in range(max_attempts):
+        guest_num = random.randint(1, 1000)
+        guest_name = f"Guest{guest_num}"
+        
+        # Check if name already exists
+        name_exists = any(g['name'] == guest_name for g in guests.values())
+        if not name_exists:
+            return guest_name
+    
+    # Fallback: use timestamp if all random failed
+    import time
+    return f"Guest{int(time.time()) % 10000}"
+
 def calculate_love_score(name1, name2):
     # Normalize names (lowercase, remove spaces)
     n1 = ''.join(sorted(name1.lower().replace(' ', '')))
@@ -96,9 +112,8 @@ def handle_connect():
     session_id = request.sid
     client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
     
-    # Generate guest name
-    guest_num = len([g for g in guests.values() if g['ip'] == client_ip]) + 1
-    guest_name = f"Guest{guest_num}"
+    # Generate unique guest name
+    guest_name = generate_unique_guest_name()
     
     guests[session_id] = {
         'ip': client_ip,
@@ -107,11 +122,13 @@ def handle_connect():
     }
     
     emit('connected', {'guest_name': guest_name, 'session_id': session_id})
+    print(f"[CONNECT] {guest_name} ({client_ip}) connected. Total guests: {len(guests)}")
 
 @socketio.on('create_room')
 def handle_create_room():
     session_id = request.sid
     if session_id not in guests:
+        emit('error', {'message': 'Session not found'})
         return
     
     # Check max 10 guests globally
@@ -120,9 +137,11 @@ def handle_create_room():
         return
     
     room_id = generate_room_id()
+    guest_name = guests[session_id]['name']
+    
     rooms[room_id] = {
-        'players': [guests[session_id]['name']],
-        'scores': {guests[session_id]['name']: 0},
+        'players': [guest_name],
+        'scores': {guest_name: 0},
         'current_game': None,
         'game_state': {}
     }
@@ -134,11 +153,20 @@ def handle_create_room():
         'room_id': room_id,
         'players': rooms[room_id]['players']
     })
+    print(f"[ROOM] {guest_name} created room {room_id}")
 
 @socketio.on('join_room')
 def handle_join_room(data):
     session_id = request.sid
-    room_id = data.get('room_id')
+    room_id = data.get('room_id', '').strip().upper()
+    
+    if session_id not in guests:
+        emit('error', {'message': 'Session not found'})
+        return
+    
+    if not room_id:
+        emit('error', {'message': 'Room ID required'})
+        return
     
     if room_id not in rooms:
         emit('error', {'message': 'Room not found'})
@@ -149,6 +177,12 @@ def handle_join_room(data):
         return
     
     guest_name = guests[session_id]['name']
+    
+    # Check if already in room
+    if guest_name in rooms[room_id]['players']:
+        emit('error', {'message': 'Already in room'})
+        return
+    
     rooms[room_id]['players'].append(guest_name)
     rooms[room_id]['scores'][guest_name] = 0
     guests[session_id]['room_id'] = room_id
@@ -159,28 +193,37 @@ def handle_join_room(data):
         'players': rooms[room_id]['players'],
         'scores': rooms[room_id]['scores']
     }, room=room_id)
+    print(f"[JOIN] {guest_name} joined room {room_id}")
 
 @socketio.on('disconnect')
 def handle_disconnect():
     session_id = request.sid
-    if session_id in guests:
-        room_id = guests[session_id].get('room_id')
-        guest_name = guests[session_id]['name']
-        
-        if room_id and room_id in rooms:
+    if session_id not in guests:
+        return
+    
+    guest_name = guests[session_id]['name']
+    room_id = guests[session_id].get('room_id')
+    
+    if room_id and room_id in rooms:
+        # Remove from room
+        if guest_name in rooms[room_id]['players']:
             rooms[room_id]['players'].remove(guest_name)
-            if guest_name in rooms[room_id]['scores']:
-                del rooms[room_id]['scores'][guest_name]
-            
-            if len(rooms[room_id]['players']) == 0:
-                del rooms[room_id]
-            else:
-                emit('player_left', {
-                    'players': rooms[room_id]['players'],
-                    'scores': rooms[room_id]['scores']
-                }, room=room_id)
+        if guest_name in rooms[room_id]['scores']:
+            del rooms[room_id]['scores'][guest_name]
         
-        del guests[session_id]
+        # Delete room if empty
+        if len(rooms[room_id]['players']) == 0:
+            del rooms[room_id]
+            print(f"[ROOM] Room {room_id} deleted (empty)")
+        else:
+            emit('player_left', {
+                'players': rooms[room_id]['players'],
+                'scores': rooms[room_id]['scores']
+            }, room=room_id)
+    
+    # Remove guest from dictionary
+    del guests[session_id]
+    print(f"[DISCONNECT] {guest_name} disconnected. Total guests: {len(guests)}")
 
 # Game: Love Calculator
 @socketio.on('love_calculate')
@@ -223,6 +266,11 @@ def handle_crack_cookie():
 @socketio.on('roll_dice')
 def handle_roll_dice(data):
     session_id = request.sid
+    
+    if session_id not in guests:
+        emit('error', {'message': 'Session not found'})
+        return
+    
     room_id = guests[session_id].get('room_id')
     
     if not room_id or room_id not in rooms:
@@ -253,9 +301,14 @@ def handle_roll_dice(data):
 @socketio.on('reset_game')
 def handle_reset_game(data):
     session_id = request.sid
+    
+    if session_id not in guests:
+        emit('error', {'message': 'Session not found'})
+        return
+    
     room_id = data.get('room_id')
     
-    if room_id not in rooms:
+    if not room_id or room_id not in rooms:
         emit('error', {'message': 'Room not found'})
         return
     
@@ -274,6 +327,7 @@ def handle_reset_game(data):
     
     # Broadcast reset to all
     emit('game_reset', room=room_id)
+    print(f"[RESET] {guest_name} reset room {room_id}")
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000)    
+    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
