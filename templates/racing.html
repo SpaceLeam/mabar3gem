@@ -117,7 +117,7 @@
             
             // Racing
             const [isRacing, setIsRacing] = useState(false);
-            const [racingPhase, setRacingPhase] = useState(''); // countdown, clicking, minigame, finished
+            const [racingPhase, setRacingPhase] = useState('');
             const [countdown, setCountdown] = useState(3);
             const [racers, setRacers] = useState([]);
             const [racerCars, setRacerCars] = useState({});
@@ -214,6 +214,7 @@
                     setFinishedRacers([]);
                     setLeaderboard([]);
                     setCountdown(3);
+                    setFrozenUntil(0);
                     
                     let count = 3;
                     const interval = setInterval(() => {
@@ -264,19 +265,28 @@
                 });
                 
                 socket.on('racing_item_received', (data) => {
-                    if (data.player === guestName) {
-                        setItems(prev => ({
-                            ...prev,
-                            [data.player]: {
-                                ...prev[data.player],
-                                [data.item]: prev[data.player][data.item] + 1
-                            }
-                        }));
-                    }
+                    setItems(prev => ({
+                        ...prev,
+                        [data.player]: {
+                            ...prev[data.player],
+                            [data.item]: (prev[data.player]?.[data.item] || 0) + 1
+                        }
+                    }));
                 });
                 
                 socket.on('racing_item_used', (data) => {
                     setPositions(data.positions);
+                    
+                    // Kurangi item yang dipake
+                    setItems(prev => ({
+                        ...prev,
+                        [data.user]: {
+                            ...prev[data.user],
+                            [data.item]: Math.max(0, prev[data.user][data.item] - 1)
+                        }
+                    }));
+                    
+                    // Freeze target kalau kena trap
                     if (data.item === 'trap' && data.target === guestName) {
                         setFrozenUntil(Date.now() + 5000);
                     }
@@ -366,6 +376,14 @@
                 if (finishedRacers.includes(guestName)) return;
                 if (frozenUntil > Date.now()) return;
                 
+                // Update local progress immediately
+                setClickProgress(prev => {
+                    const current = prev[guestName] || 0;
+                    const target = clickTarget[guestName] || 20;
+                    const newVal = Math.min(current + 1, target);
+                    return {...prev, [guestName]: newVal};
+                });
+                
                 socket.emit('racing_click');
             };
             
@@ -378,6 +396,9 @@
             };
             
             const useItem = (itemType, target = null) => {
+                const myItems = items[guestName] || {bomb: 0, boost: 0, trap: 0};
+                if (myItems[itemType] <= 0) return;
+                
                 socket.emit('racing_use_item', { item: itemType, target });
                 setShowItemMenu(false);
                 setSelectedItem(null);
@@ -491,7 +512,7 @@
                                                 <div className="bg-[#0d1117] border border-[#30363d] rounded-full h-6 overflow-hidden relative">
                                                     <div 
                                                         className="bg-gradient-to-r from-[#238636] to-[#2ea043] h-full transition-all duration-300"
-                                                        style={{width: `${percentage}%`}}
+                                                        style={{width: percentage + '%'}}
                                                     />
                                                     <div className="track-line absolute inset-0" />
                                                 </div>
@@ -503,7 +524,7 @@
                         </div>
                         
                         {/* Items Bar */}
-                        {hasItems && racingPhase !== 'finished' && racingPhase !== 'gameover' && (
+                        {hasItems && racingPhase !== 'finished' && racingPhase !== 'gameover' && !isFrozen && (
                             <div className="bg-[#161b22] border-t border-[#30363d] p-2">
                                 <div className="flex gap-2 justify-center">
                                     {myItems.bomb > 0 && (
@@ -594,7 +615,7 @@
                                     <button
                                         onTouchStart={handleRacingClick}
                                         onClick={handleRacingClick}
-                                        className="w-full bg-[#238636] active:bg-[#2ea043] text-white font-bold py-12 rounded-lg text-2xl"
+                                        className="w-full bg-[#238636] active:bg-[#2ea043] text-white font-bold py-12 rounded-lg text-2xl select-none"
                                     >
                                         TAP! 👆
                                     </button>
@@ -605,7 +626,7 @@
                                 <div>
                                     <div className="text-[#8b949e] text-sm mb-2 text-center">Mini Game</div>
                                     
-                                    {miniGame.type === 'color' && (
+                                    {miniGame && miniGame.type === 'color' && (
                                         <div className="text-center mb-4">
                                             <div className="text-white mb-2">{miniGame.question}</div>
                                             <div 
@@ -617,7 +638,7 @@
                                         </div>
                                     )}
                                     
-                                    {miniGame.type !== 'color' && (
+                                    {miniGame && miniGame.type !== 'color' && (
                                         <div className="text-center text-xl font-bold text-white mb-4">
                                             {miniGame.question}
                                         </div>
@@ -1020,4 +1041,4 @@
     </script>
     {% endraw %}
 </body>
-</html> 
+</html>
