@@ -80,6 +80,7 @@
 <body class="bg-[#0d1117] min-h-screen">
     <div id="root"></div>
     
+    {% raw %}
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
         const socket = io();
@@ -1017,5 +1018,6 @@
         
         ReactDOM.render(<App />, document.getElementById('root'));
     </script>
+    {% endraw %}
 </body>
-</html>
+</html> 
