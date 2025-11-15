@@ -4,6 +4,7 @@ import random
 import hashlib
 import string
 from datetime import datetime
+import time
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'mabar3gem-secret-key'
@@ -12,6 +13,8 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 # Game state
 rooms = {}
 guests = {}  # {session_id: {ip, name, room_id}}
+racing_rooms = {}  # {room_id: racing state}
+
 fortune_cookies = [
     # Positive (40)
     "Your hard work will soon pay off.", "Good fortune is coming your way.", 
@@ -70,49 +73,106 @@ fortune_cookies = [
     "Neither yes nor no, but perhaps.", "Only time will tell for sure."
 ]
 
+# Racing mini games data
+mini_games = {
+    'guess_number': {
+        'type': 'guess_number',
+        'question': 'Guess the number (1-10)',
+        'answer': None  # Will be random
+    },
+    'math': [
+        {'q': '5 + 3', 'a': '8'},
+        {'q': '12 - 4', 'a': '8'},
+        {'q': '7 + 2', 'a': '9'},
+        {'q': '15 - 6', 'a': '9'},
+        {'q': '8 + 4', 'a': '12'},
+        {'q': '20 - 5', 'a': '15'},
+        {'q': '6 + 7', 'a': '13'},
+        {'q': '18 - 9', 'a': '9'},
+        {'q': '9 + 6', 'a': '15'},
+        {'q': '14 - 7', 'a': '7'}
+    ],
+    'type_word': [
+        'speed', 'quick', 'fast', 'rush', 'zoom', 'dash', 'bolt', 
+        'race', 'turbo', 'nitro', 'boost', 'power', 'fire', 'flash'
+    ],
+    'color': [
+        {'text': 'RED', 'color': 'blue', 'answer': 'red'},
+        {'text': 'BLUE', 'color': 'red', 'answer': 'blue'},
+        {'text': 'GREEN', 'color': 'yellow', 'answer': 'green'},
+        {'text': 'YELLOW', 'color': 'green', 'answer': 'yellow'},
+        {'text': 'PURPLE', 'color': 'orange', 'answer': 'purple'},
+        {'text': 'ORANGE', 'color': 'purple', 'answer': 'orange'}
+    ]
+}
+
+cars = ['🚗', '🚙', '🚕', '🚓', '🏎️']
+
 def generate_room_id():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
 def generate_unique_guest_name():
-    """Generate unique guest name yang belum dipake"""
     max_attempts = 1000
     for _ in range(max_attempts):
         guest_num = random.randint(1, 1000)
         guest_name = f"Guest{guest_num}"
-        
-        # Check if name already exists
         name_exists = any(g['name'] == guest_name for g in guests.values())
         if not name_exists:
             return guest_name
-    
-    # Fallback: use timestamp if all random failed
     import time
     return f"Guest{int(time.time()) % 10000}"
 
 def calculate_love_score(name1, name2):
-    # Normalize names (lowercase, remove spaces)
     n1 = ''.join(sorted(name1.lower().replace(' ', '')))
     n2 = ''.join(sorted(name2.lower().replace(' ', '')))
-    
-    # Create consistent hash regardless of order
     combined = ''.join(sorted([n1, n2]))
     hash_obj = hashlib.md5(combined.encode())
     hash_int = int(hash_obj.hexdigest(), 16)
-    
-    # Generate consistent score 10-99%
     score = (hash_int % 90) + 10
     return score
 
+def generate_mini_game():
+    game_type = random.choice(['guess_number', 'math', 'type_word', 'color'])
+    
+    if game_type == 'guess_number':
+        answer = random.randint(1, 10)
+        return {
+            'type': 'guess_number',
+            'question': 'Guess the number (1-10)',
+            'answer': str(answer)
+        }
+    elif game_type == 'math':
+        game = random.choice(mini_games['math'])
+        return {
+            'type': 'math',
+            'question': game['q'],
+            'answer': game['a']
+        }
+    elif game_type == 'type_word':
+        word = random.choice(mini_games['type_word'])
+        return {
+            'type': 'type_word',
+            'question': f'Type: {word}',
+            'answer': word
+        }
+    elif game_type == 'color':
+        game = random.choice(mini_games['color'])
+        return {
+            'type': 'color',
+            'question': f'What color is the TEXT?',
+            'text': game['text'],
+            'color': game['color'],
+            'answer': game['answer']
+        }
+
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('racing.html')
 
 @socketio.on('connect')
 def handle_connect():
     session_id = request.sid
     client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
-    
-    # Generate unique guest name
     guest_name = generate_unique_guest_name()
     
     guests[session_id] = {
@@ -131,7 +191,6 @@ def handle_create_room():
         emit('error', {'message': 'Session not found'})
         return
     
-    # Check max 10 guests globally
     if len(guests) >= 10:
         emit('error', {'message': 'Server full (max 10 guests)'})
         return
@@ -178,7 +237,6 @@ def handle_join_room(data):
     
     guest_name = guests[session_id]['name']
     
-    # Check if already in room
     if guest_name in rooms[room_id]['players']:
         emit('error', {'message': 'Already in room'})
         return
@@ -205,15 +263,15 @@ def handle_disconnect():
     room_id = guests[session_id].get('room_id')
     
     if room_id and room_id in rooms:
-        # Remove from room
         if guest_name in rooms[room_id]['players']:
             rooms[room_id]['players'].remove(guest_name)
         if guest_name in rooms[room_id]['scores']:
             del rooms[room_id]['scores'][guest_name]
         
-        # Delete room if empty
         if len(rooms[room_id]['players']) == 0:
             del rooms[room_id]
+            if room_id in racing_rooms:
+                del racing_rooms[room_id]
             print(f"[ROOM] Room {room_id} deleted (empty)")
         else:
             emit('player_left', {
@@ -221,7 +279,6 @@ def handle_disconnect():
                 'scores': rooms[room_id]['scores']
             }, room=room_id)
     
-    # Remove guest from dictionary
     del guests[session_id]
     print(f"[DISCONNECT] {guest_name} disconnected. Total guests: {len(guests)}")
 
@@ -246,7 +303,6 @@ def handle_love_calculate(data):
     
     score = calculate_love_score(name1, name2)
     
-    # Broadcast to all players in room
     if room_id and room_id in rooms:
         emit('love_result', {
             'player': guest_name,
@@ -276,7 +332,6 @@ def handle_crack_cookie():
     
     fortune = random.choice(fortune_cookies)
     
-    # Determine category
     idx = fortune_cookies.index(fortune)
     if idx < 40:
         category = 'positive'
@@ -285,7 +340,6 @@ def handle_crack_cookie():
     else:
         category = 'maybe'
     
-    # Broadcast to all players in room
     if room_id and room_id in rooms:
         emit('fortune_result', {
             'player': guest_name,
@@ -318,14 +372,11 @@ def handle_roll_dice(data):
     num_dice = data.get('num_dice', 1)
     dice_sides = data.get('dice_sides', 6)
     
-    # Roll dice
     rolls = [random.randint(1, dice_sides) for _ in range(num_dice)]
     total = sum(rolls)
     
-    # Update score
     rooms[room_id]['scores'][guest_name] += total
     
-    # Broadcast to room
     emit('dice_rolled', {
         'player': guest_name,
         'rolls': rolls,
@@ -333,6 +384,301 @@ def handle_roll_dice(data):
         'scores': rooms[room_id]['scores'],
         'timestamp': datetime.now().strftime('%H:%M:%S')
     }, room=room_id)
+
+# Racing: Start Race
+@socketio.on('start_racing')
+def handle_start_racing(data):
+    session_id = request.sid
+    
+    if session_id not in guests:
+        emit('error', {'message': 'Session not found'})
+        return
+    
+    room_id = guests[session_id].get('room_id')
+    
+    if not room_id or room_id not in rooms:
+        emit('error', {'message': 'Room not found'})
+        return
+    
+    guest_name = guests[session_id]['name']
+    
+    # Check if owner
+    if guest_name != rooms[room_id]['players'][0]:
+        emit('error', {'message': 'Only room owner can start race'})
+        return
+    
+    max_players = data.get('max_players', 5)
+    if max_players < 2 or max_players > 5:
+        emit('error', {'message': 'Max players must be 2-5'})
+        return
+    
+    # Select racers (first N players)
+    racers = rooms[room_id]['players'][:max_players]
+    
+    if len(racers) < 2:
+        emit('error', {'message': 'Need at least 2 players to race'})
+        return
+    
+    # Assign random cars
+    assigned_cars = random.sample(cars, len(racers))
+    
+    racing_rooms[room_id] = {
+        'racers': racers,
+        'cars': {racers[i]: assigned_cars[i] for i in range(len(racers))},
+        'positions': {racer: 0 for racer in racers},
+        'click_progress': {racer: 0 for racer in racers},
+        'click_target': {racer: 20 for racer in racers},
+        'items': {racer: {'bomb': 0, 'boost': 0, 'trap': 0} for racer in racers},
+        'frozen': {racer: 0 for racer in racers},  # timestamp when unfrozen
+        'finished': [],
+        'phase': 'countdown',  # countdown, clicking, minigame
+        'mini_game': None,
+        'game_errors': {racer: 0 for racer in racers},
+        'leaderboard': []
+    }
+    
+    # Broadcast countdown
+    emit('racing_countdown', {
+        'racers': racers,
+        'cars': racing_rooms[room_id]['cars']
+    }, room=room_id)
+    
+    print(f"[RACING] {guest_name} started race in {room_id} with {len(racers)} racers")
+
+# Racing: Click Progress
+@socketio.on('racing_click')
+def handle_racing_click():
+    session_id = request.sid
+    
+    if session_id not in guests:
+        return
+    
+    room_id = guests[session_id].get('room_id')
+    guest_name = guests[session_id]['name']
+    
+    if not room_id or room_id not in racing_rooms:
+        return
+    
+    race = racing_rooms[room_id]
+    
+    if race['phase'] != 'clicking':
+        return
+    
+    if guest_name not in race['racers']:
+        return
+    
+    if guest_name in race['finished']:
+        return
+    
+    # Check if frozen
+    if time.time() < race['frozen'][guest_name]:
+        return
+    
+    race['click_progress'][guest_name] += 1
+    
+    # Check if completed clicks
+    if race['click_progress'][guest_name] >= race['click_target'][guest_name]:
+        # Move to mini game
+        race['phase'] = 'minigame'
+        race['mini_game'] = generate_mini_game()
+        race['game_errors'] = {racer: 0 for racer in race['racers']}
+        
+        emit('racing_minigame', {
+            'game': race['mini_game'],
+            'positions': race['positions']
+        }, room=room_id)
+    else:
+        emit('racing_click_update', {
+            'player': guest_name,
+            'progress': race['click_progress'][guest_name],
+            'target': race['click_target'][guest_name]
+        }, room=room_id)
+
+# Racing: Answer Mini Game
+@socketio.on('racing_answer')
+def handle_racing_answer(data):
+    session_id = request.sid
+    
+    if session_id not in guests:
+        return
+    
+    room_id = guests[session_id].get('room_id')
+    guest_name = guests[session_id]['name']
+    answer = data.get('answer', '').strip().lower()
+    
+    if not room_id or room_id not in racing_rooms:
+        return
+    
+    race = racing_rooms[room_id]
+    
+    if race['phase'] != 'minigame':
+        return
+    
+    if guest_name not in race['racers']:
+        return
+    
+    if guest_name in race['finished']:
+        return
+    
+    # Check if frozen
+    if time.time() < race['frozen'][guest_name]:
+        return
+    
+    correct_answer = race['mini_game']['answer'].lower()
+    
+    if answer == correct_answer:
+        # Correct answer - move forward 10
+        race['positions'][guest_name] += 10
+        
+        # Reset click progress for next round
+        race['click_progress'][guest_name] = 0
+        
+        # Calculate rank bonus
+        sorted_positions = sorted(race['positions'].items(), key=lambda x: x[1], reverse=True)
+        rank = next((i for i, (p, _) in enumerate(sorted_positions) if p == guest_name), -1)
+        
+        if rank == 0:
+            race['click_target'][guest_name] = 20 + 4
+            # 33% chance to get item
+            if random.random() < 0.33:
+                item_type = random.choice(['bomb', 'boost', 'trap'])
+                race['items'][guest_name][item_type] += 1
+                emit('racing_item_received', {
+                    'player': guest_name,
+                    'item': item_type
+                }, room=room_id)
+        elif rank == 1:
+            race['click_target'][guest_name] = 20 + 3
+        elif rank == 2:
+            race['click_target'][guest_name] = 20 + 2
+        else:
+            race['click_target'][guest_name] = 20
+        
+        # Check if finished (150)
+        if race['positions'][guest_name] >= 150:
+            race['finished'].append(guest_name)
+            race['leaderboard'].append({
+                'player': guest_name,
+                'position': race['positions'][guest_name],
+                'rank': len(race['finished'])
+            })
+            
+            emit('racing_player_finished', {
+                'player': guest_name,
+                'rank': len(race['finished']),
+                'leaderboard': race['leaderboard']
+            }, room=room_id)
+            
+            # Check if all finished
+            if len(race['finished']) == len(race['racers']):
+                emit('racing_game_over', {
+                    'leaderboard': race['leaderboard']
+                }, room=room_id)
+                return
+        
+        # Move to clicking phase
+        race['phase'] = 'clicking'
+        
+        emit('racing_answer_correct', {
+            'player': guest_name,
+            'positions': race['positions'],
+            'click_targets': race['click_target']
+        }, room=room_id)
+        
+    else:
+        # Wrong answer
+        race['game_errors'][guest_name] += 1
+        
+        if race['game_errors'][guest_name] >= 3:
+            # Penalty: move back 5
+            race['positions'][guest_name] = max(0, race['positions'][guest_name] - 5)
+            race['game_errors'][guest_name] = 0
+            
+            emit('racing_penalty', {
+                'player': guest_name,
+                'positions': race['positions']
+            }, room=room_id)
+        else:
+            emit('racing_answer_wrong', {
+                'player': guest_name,
+                'errors': race['game_errors'][guest_name]
+            }, room=room_id)
+
+# Racing: Use Item
+@socketio.on('racing_use_item')
+def handle_racing_use_item(data):
+    session_id = request.sid
+    
+    if session_id not in guests:
+        return
+    
+    room_id = guests[session_id].get('room_id')
+    guest_name = guests[session_id]['name']
+    item_type = data.get('item')
+    target = data.get('target')
+    
+    if not room_id or room_id not in racing_rooms:
+        return
+    
+    race = racing_rooms[room_id]
+    
+    if guest_name not in race['racers']:
+        return
+    
+    if guest_name in race['finished']:
+        return
+    
+    if race['items'][guest_name][item_type] <= 0:
+        return
+    
+    race['items'][guest_name][item_type] -= 1
+    
+    if item_type == 'bomb':
+        # Target loses 8 points
+        if target and target in race['racers'] and target not in race['finished']:
+            race['positions'][target] = max(0, race['positions'][target] - 8)
+            emit('racing_item_used', {
+                'player': guest_name,
+                'item': 'bomb',
+                'target': target,
+                'positions': race['positions']
+            }, room=room_id)
+    
+    elif item_type == 'boost':
+        # Self gains 5 points
+        race['positions'][guest_name] += 5
+        
+        # Check if finished
+        if race['positions'][guest_name] >= 150 and guest_name not in race['finished']:
+            race['finished'].append(guest_name)
+            race['leaderboard'].append({
+                'player': guest_name,
+                'position': race['positions'][guest_name],
+                'rank': len(race['finished'])
+            })
+            
+            emit('racing_player_finished', {
+                'player': guest_name,
+                'rank': len(race['finished']),
+                'leaderboard': race['leaderboard']
+            }, room=room_id)
+        else:
+            emit('racing_item_used', {
+                'player': guest_name,
+                'item': 'boost',
+                'positions': race['positions']
+            }, room=room_id)
+    
+    elif item_type == 'trap':
+        # Target frozen for 5 seconds
+        if target and target in race['racers'] and target not in race['finished']:
+            race['frozen'][target] = time.time() + 5
+            emit('racing_item_used', {
+                'player': guest_name,
+                'item': 'trap',
+                'target': target,
+                'frozen_until': race['frozen'][target]
+            }, room=room_id)
 
 # Game: Reset (Owner Only)
 @socketio.on('reset_game')
@@ -351,18 +697,18 @@ def handle_reset_game(data):
     
     guest_name = guests[session_id]['name']
     
-    # Check if owner
     if guest_name != rooms[room_id]['players'][0]:
         emit('error', {'message': 'Only room owner can reset'})
         return
     
-    # Reset scores
     for player in rooms[room_id]['players']:
         rooms[room_id]['scores'][player] = 0
     
     rooms[room_id]['game_state'] = {}
     
-    # Broadcast reset to all
+    if room_id in racing_rooms:
+        del racing_rooms[room_id]
+    
     emit('game_reset', room=room_id)
     print(f"[RESET] {guest_name} reset room {room_id}")
 

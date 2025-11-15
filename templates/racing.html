@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mabar3gem Racing</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        @keyframes heartbeat {
+            0%, 100% { transform: scale(1); }
+            10%, 30% { transform: scale(1.1); }
+            20%, 40% { transform: scale(1.05); }
+        }
+        
+        @keyframes crack {
+            0% { transform: rotate(0deg) scale(1); }
+            25% { transform: rotate(-15deg) scale(1.1); }
+            50% { transform: rotate(15deg) scale(1.15); }
+            75% { transform: rotate(-10deg) scale(1.1); }
+            100% { transform: rotate(0deg) scale(0); opacity: 0; }
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateY(30px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        @keyframes diceRoll {
+            0% { transform: rotateX(0deg) rotateY(0deg); }
+            100% { transform: rotateX(720deg) rotateY(720deg); }
+        }
+        
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        
+        @keyframes carMove {
+            0% { transform: translateX(-5px); }
+            50% { transform: translateX(5px); }
+            100% { transform: translateX(-5px); }
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+        
+        .animate-heartbeat { animation: heartbeat 0.8s ease-in-out; }
+        .animate-crack { animation: crack 0.6s forwards; }
+        .animate-slideup { animation: slideUp 0.5s ease-out; }
+        .animate-diceroll { animation: diceRoll 0.5s ease-out; }
+        .animate-bounce { animation: bounce 2s infinite; }
+        .animate-carmove { animation: carMove 0.5s ease-in-out infinite; }
+        .animate-pulse { animation: pulse 1s ease-in-out infinite; }
+        .animate-shake { animation: shake 0.3s ease-in-out; }
+        
+        .track-line {
+            background: repeating-linear-gradient(
+                90deg,
+                #30363d 0px,
+                #30363d 20px,
+                transparent 20px,
+                transparent 40px
+            );
+            height: 2px;
+        }
+    </style>
+</head>
+<body class="bg-[#0d1117] min-h-screen">
+    <div id="root"></div>
+    
+    {% raw %}
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        const socket = io();
+        
+        function App() {
+            const [guestName, setGuestName] = useState('');
+            const [roomId, setRoomId] = useState('');
+            const [inRoom, setInRoom] = useState(false);
+            const [players, setPlayers] = useState([]);
+            const [scores, setScores] = useState({});
+            const [activeGame, setActiveGame] = useState('love');
+            const [roomOwner, setRoomOwner] = useState('');
+            
+            // Love Calculator
+            const [name1, setName1] = useState('');
+            const [name2, setName2] = useState('');
+            const [loveResult, setLoveResult] = useState(null);
+            const [loveLog, setLoveLog] = useState([]);
+            const [showLoveResult, setShowLoveResult] = useState(false);
+            
+            // Fortune Cookie
+            const [fortune, setFortune] = useState(null);
+            const [fortuneLog, setFortuneLog] = useState([]);
+            const [isCracking, setIsCracking] = useState(false);
+            const [showFortune, setShowFortune] = useState(false);
+            
+            // Dice
+            const [numDice, setNumDice] = useState(1);
+            const [diceSides, setDiceSides] = useState(6);
+            const [diceResults, setDiceResults] = useState([]);
+            const [activityLog, setActivityLog] = useState([]);
+            const [showDice, setShowDice] = useState(false);
+            const [canRoll, setCanRoll] = useState(true);
+            
+            // Racing
+            const [isRacing, setIsRacing] = useState(false);
+            const [racingPhase, setRacingPhase] = useState(''); // countdown, clicking, minigame, finished
+            const [countdown, setCountdown] = useState(3);
+            const [racers, setRacers] = useState([]);
+            const [racerCars, setRacerCars] = useState({});
+            const [positions, setPositions] = useState({});
+            const [clickProgress, setClickProgress] = useState({});
+            const [clickTarget, setClickTarget] = useState({});
+            const [items, setItems] = useState({});
+            const [miniGame, setMiniGame] = useState(null);
+            const [gameAnswer, setGameAnswer] = useState('');
+            const [gameErrors, setGameErrors] = useState(0);
+            const [leaderboard, setLeaderboard] = useState([]);
+            const [finishedRacers, setFinishedRacers] = useState([]);
+            const [maxPlayers, setMaxPlayers] = useState(5);
+            const [frozenUntil, setFrozenUntil] = useState(0);
+            const [showItemMenu, setShowItemMenu] = useState(false);
+            const [selectedItem, setSelectedItem] = useState(null);
+            
+            useEffect(() => {
+                socket.on('connected', (data) => setGuestName(data.guest_name));
+                
+                socket.on('room_created', (data) => {
+                    setRoomId(data.room_id);
+                    setInRoom(true);
+                    setPlayers(data.players);
+                    setRoomOwner(data.players[0]);
+                    setScores({[data.players[0]]: 0});
+                });
+                
+                socket.on('player_joined', (data) => {
+                    setPlayers(data.players);
+                    setScores(data.scores);
+                    setInRoom(true);
+                    if (data.players.length > 0) {
+                        setRoomOwner(data.players[0]);
+                    }
+                });
+                
+                socket.on('player_left', (data) => {
+                    setPlayers(data.players);
+                    setScores(data.scores);
+                    if (data.players.length > 0) {
+                        setRoomOwner(data.players[0]);
+                    }
+                });
+                
+                socket.on('love_result', (data) => {
+                    setLoveResult(data);
+                    setShowLoveResult(true);
+                    setLoveLog(prev => [{
+                        player: data.player,
+                        name1: data.name1,
+                        name2: data.name2,
+                        score: data.score,
+                        time: new Date().toLocaleTimeString()
+                    }, ...prev].slice(0, 10));
+                });
+                
+                socket.on('fortune_result', (data) => {
+                    setTimeout(() => {
+                        setFortune(data);
+                        setShowFortune(true);
+                        setIsCracking(false);
+                        setFortuneLog(prev => [{
+                            player: data.player,
+                            fortune: data.fortune,
+                            category: data.category,
+                            time: new Date().toLocaleTimeString()
+                        }, ...prev].slice(0, 10));
+                    }, 600);
+                });
+                
+                socket.on('dice_rolled', (data) => {
+                    setDiceResults(data.rolls);
+                    setShowDice(true);
+                    setScores(data.scores);
+                    setActivityLog(prev => [{
+                        player: data.player,
+                        rolls: data.rolls,
+                        total: data.total,
+                        time: data.timestamp
+                    }, ...prev].slice(0, 10));
+                });
+                
+                // Racing events
+                socket.on('racing_countdown', (data) => {
+                    setIsRacing(true);
+                    setRacingPhase('countdown');
+                    setRacers(data.racers);
+                    setRacerCars(data.cars);
+                    setPositions(data.racers.reduce((acc, r) => ({...acc, [r]: 0}), {}));
+                    setClickProgress(data.racers.reduce((acc, r) => ({...acc, [r]: 0}), {}));
+                    setClickTarget(data.racers.reduce((acc, r) => ({...acc, [r]: 20}), {}));
+                    setItems(data.racers.reduce((acc, r) => ({...acc, [r]: {bomb: 0, boost: 0, trap: 0}}), {}));
+                    setFinishedRacers([]);
+                    setLeaderboard([]);
+                    setCountdown(3);
+                    
+                    let count = 3;
+                    const interval = setInterval(() => {
+                        count--;
+                        setCountdown(count);
+                        if (count === 0) {
+                            clearInterval(interval);
+                            setTimeout(() => {
+                                setRacingPhase('clicking');
+                            }, 500);
+                        }
+                    }, 1000);
+                });
+                
+                socket.on('racing_click_update', (data) => {
+                    setClickProgress(prev => ({...prev, [data.player]: data.progress}));
+                });
+                
+                socket.on('racing_minigame', (data) => {
+                    setRacingPhase('minigame');
+                    setMiniGame(data.game);
+                    setPositions(data.positions);
+                    setGameAnswer('');
+                    setGameErrors(0);
+                });
+                
+                socket.on('racing_answer_correct', (data) => {
+                    setPositions(data.positions);
+                    setClickTarget(data.click_targets);
+                    setClickProgress(prev => {
+                        const newProg = {...prev};
+                        Object.keys(newProg).forEach(k => newProg[k] = 0);
+                        return newProg;
+                    });
+                    setRacingPhase('clicking');
+                    setGameAnswer('');
+                    setGameErrors(0);
+                });
+                
+                socket.on('racing_answer_wrong', (data) => {
+                    setGameErrors(data.errors);
+                    setGameAnswer('');
+                });
+                
+                socket.on('racing_penalty', (data) => {
+                    setPositions(data.positions);
+                    setGameErrors(0);
+                });
+                
+                socket.on('racing_item_received', (data) => {
+                    if (data.player === guestName) {
+                        setItems(prev => ({
+                            ...prev,
+                            [data.player]: {
+                                ...prev[data.player],
+                                [data.item]: prev[data.player][data.item] + 1
+                            }
+                        }));
+                    }
+                });
+                
+                socket.on('racing_item_used', (data) => {
+                    setPositions(data.positions);
+                    if (data.item === 'trap' && data.target === guestName) {
+                        setFrozenUntil(Date.now() + 5000);
+                    }
+                });
+                
+                socket.on('racing_player_finished', (data) => {
+                    setFinishedRacers(prev => [...prev, data.player]);
+                    setLeaderboard(data.leaderboard);
+                    if (data.player === guestName) {
+                        setRacingPhase('finished');
+                    }
+                });
+                
+                socket.on('racing_game_over', (data) => {
+                    setRacingPhase('gameover');
+                    setLeaderboard(data.leaderboard);
+                });
+                
+                socket.on('game_reset', () => {
+                    setScores({});
+                    setActivityLog([]);
+                    setLoveLog([]);
+                    setFortuneLog([]);
+                    setLoveResult(null);
+                    setFortune(null);
+                    setDiceResults([]);
+                    setShowLoveResult(false);
+                    setShowFortune(false);
+                    setShowDice(false);
+                    setIsRacing(false);
+                    setRacingPhase('');
+                });
+                
+                socket.on('error', (data) => alert(data.message));
+                
+                return () => socket.removeAllListeners();
+            }, [guestName]);
+            
+            // Auto-update frozen timer
+            useEffect(() => {
+                if (frozenUntil > Date.now()) {
+                    const timer = setInterval(() => {
+                        if (Date.now() >= frozenUntil) {
+                            setFrozenUntil(0);
+                            clearInterval(timer);
+                        }
+                    }, 100);
+                    return () => clearInterval(timer);
+                }
+            }, [frozenUntil]);
+            
+            const calculateLove = () => {
+                if (name1.trim() && name2.trim()) {
+                    setShowLoveResult(false);
+                    setTimeout(() => {
+                        socket.emit('love_calculate', { name1, name2 });
+                    }, 100);
+                }
+            };
+            
+            const crackCookie = () => {
+                if (isCracking) return;
+                setIsCracking(true);
+                setShowFortune(false);
+                socket.emit('crack_cookie');
+            };
+            
+            const rollDice = () => {
+                if (!canRoll) return;
+                setCanRoll(false);
+                setShowDice(false);
+                
+                socket.emit('roll_dice', { 
+                    num_dice: parseInt(numDice),
+                    dice_sides: parseInt(diceSides)
+                });
+                
+                setTimeout(() => setCanRoll(true), 1000);
+            };
+            
+            const startRacing = () => {
+                socket.emit('start_racing', { max_players: maxPlayers });
+            };
+            
+            const handleRacingClick = () => {
+                if (racingPhase !== 'clicking') return;
+                if (finishedRacers.includes(guestName)) return;
+                if (frozenUntil > Date.now()) return;
+                
+                socket.emit('racing_click');
+            };
+            
+            const submitAnswer = () => {
+                if (!gameAnswer.trim()) return;
+                if (finishedRacers.includes(guestName)) return;
+                if (frozenUntil > Date.now()) return;
+                
+                socket.emit('racing_answer', { answer: gameAnswer });
+            };
+            
+            const useItem = (itemType, target = null) => {
+                socket.emit('racing_use_item', { item: itemType, target });
+                setShowItemMenu(false);
+                setSelectedItem(null);
+            };
+            
+            const resetGame = () => {
+                if (guestName === roomOwner) {
+                    socket.emit('reset_game', { room_id: roomId });
+                }
+            };
+            
+            if (!inRoom) {
+                return (
+                    <div className="max-w-md mx-auto mt-10 p-4">
+                        <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-6">
+                            <h1 className="text-2xl font-bold text-white mb-2">🏁 Mabar3gem</h1>
+                            <p className="text-[#8b949e] mb-6 text-sm">Multiplayer Fun + Racing</p>
+                            
+                            <div className="mb-6">
+                                <div className="bg-[#0d1117] border border-[#30363d] rounded px-4 py-3 text-white text-center">
+                                    {guestName || 'Connecting...'}
+                                </div>
+                            </div>
+                            
+                            <button 
+                                onClick={() => socket.emit('create_room')}
+                                className="w-full bg-[#238636] hover:bg-[#2ea043] text-white font-semibold py-3 px-4 rounded mb-3 transition"
+                            >
+                                Create Room
+                            </button>
+                            
+                            <div className="relative my-4">
+                                <div className="absolute inset-0 flex items-center">
+                                    <div className="w-full border-t border-[#30363d]"></div>
+                                </div>
+                                <div className="relative flex justify-center text-xs">
+                                    <span className="px-2 bg-[#161b22] text-[#8b949e]">or</span>
+                                </div>
+                            </div>
+                            
+                            <input 
+                                type="text"
+                                placeholder="Enter Room ID"
+                                value={roomId}
+                                onChange={(e) => setRoomId(e.target.value.toUpperCase())}
+                                className="w-full bg-[#0d1117] border border-[#30363d] text-white rounded px-4 py-3 mb-3 focus:outline-none focus:border-[#58a6ff]"
+                            />
+                            <button 
+                                onClick={() => roomId.trim() && socket.emit('join_room', { room_id: roomId })}
+                                className="w-full bg-[#21262d] hover:bg-[#30363d] text-white font-semibold py-3 px-4 rounded transition"
+                            >
+                                Join Room
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+            
+            // Racing Mode
+            if (isRacing) {
+                const isFrozen = frozenUntil > Date.now();
+                const myItems = items[guestName] || {bomb: 0, boost: 0, trap: 0};
+                const hasItems = myItems.bomb > 0 || myItems.boost > 0 || myItems.trap > 0;
+                
+                return (
+                    <div className="h-screen flex flex-col bg-[#0d1117] overflow-hidden">
+                        {/* Header */}
+                        <div className="bg-[#161b22] border-b border-[#30363d] p-2 flex justify-between items-center">
+                            <div className="text-white text-xs font-mono">🏁 Room: {roomId}</div>
+                            <div className="text-[#58a6ff] text-xs">{guestName}</div>
+                        </div>
+                        
+                        {/* Countdown Overlay */}
+                        {racingPhase === 'countdown' && (
+                            <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50">
+                                <div className="text-center">
+                                    {countdown > 0 ? (
+                                        <div className="text-9xl font-bold text-[#f85149] animate-pulse">
+                                            {countdown}
+                                        </div>
+                                    ) : (
+                                        <div className="text-7xl font-bold text-[#238636] animate-bounce">
+                                            GO! 🏁
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* Track Area */}
+                        <div className="flex-1 overflow-y-auto p-2">
+                            {racers.map((racer, i) => {
+                                const pos = positions[racer] || 0;
+                                const percentage = Math.min((pos / 150) * 100, 100);
+                                const isFinished = finishedRacers.includes(racer);
+                                
+                                return (
+                                    <div key={i} className="mb-3">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <div className={`text-2xl ${racingPhase === 'clicking' && !isFinished ? 'animate-carmove' : ''}`}>
+                                                {racerCars[racer]}
+                                            </div>
+                                            <div className="flex-1">
+                                                <div className="flex justify-between text-xs mb-1">
+                                                    <span className={racer === guestName ? 'text-[#58a6ff] font-bold' : 'text-[#8b949e]'}>
+                                                        {racer}
+                                                        {isFinished && ` 🏆 #${finishedRacers.indexOf(racer) + 1}`}
+                                                    </span>
+                                                    <span className="text-white">{pos}/150</span>
+                                                </div>
+                                                <div className="bg-[#0d1117] border border-[#30363d] rounded-full h-6 overflow-hidden relative">
+                                                    <div 
+                                                        className="bg-gradient-to-r from-[#238636] to-[#2ea043] h-full transition-all duration-300"
+                                                        style={{width: `${percentage}%`}}
+                                                    />
+                                                    <div className="track-line absolute inset-0" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        
+                        {/* Items Bar */}
+                        {hasItems && racingPhase !== 'finished' && racingPhase !== 'gameover' && (
+                            <div className="bg-[#161b22] border-t border-[#30363d] p-2">
+                                <div className="flex gap-2 justify-center">
+                                    {myItems.bomb > 0 && (
+                                        <button
+                                            onClick={() => {
+                                                setSelectedItem('bomb');
+                                                setShowItemMenu(true);
+                                            }}
+                                            className="bg-[#f85149] hover:bg-[#ff6b6b] text-white px-4 py-2 rounded text-sm font-semibold"
+                                        >
+                                            💣 x{myItems.bomb}
+                                        </button>
+                                    )}
+                                    {myItems.boost > 0 && (
+                                        <button
+                                            onClick={() => useItem('boost')}
+                                            className="bg-[#58a6ff] hover:bg-[#79c0ff] text-white px-4 py-2 rounded text-sm font-semibold"
+                                        >
+                                            🚀 x{myItems.boost}
+                                        </button>
+                                    )}
+                                    {myItems.trap > 0 && (
+                                        <button
+                                            onClick={() => {
+                                                setSelectedItem('trap');
+                                                setShowItemMenu(true);
+                                            }}
+                                            className="bg-[#d29922] hover:bg-[#e8b44a] text-white px-4 py-2 rounded text-sm font-semibold"
+                                        >
+                                            🕳️ x{myItems.trap}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* Item Target Menu */}
+                        {showItemMenu && (
+                            <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50">
+                                <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-4 max-w-xs w-full mx-4">
+                                    <h3 className="text-white font-bold mb-3 text-center">
+                                        Select Target for {selectedItem === 'bomb' ? '💣' : '🕳️'}
+                                    </h3>
+                                    <div className="space-y-2 mb-3">
+                                        {racers.filter(r => r !== guestName && !finishedRacers.includes(r)).map(racer => (
+                                            <button
+                                                key={racer}
+                                                onClick={() => useItem(selectedItem, racer)}
+                                                className="w-full bg-[#21262d] hover:bg-[#30363d] text-white py-2 rounded transition"
+                                            >
+                                                {racer}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            setShowItemMenu(false);
+                                            setSelectedItem(null);
+                                        }}
+                                        className="w-full bg-[#f85149] hover:bg-[#ff6b6b] text-white py-2 rounded transition"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* Game Area */}
+                        <div className="bg-[#161b22] border-t-2 border-[#30363d] p-4">
+                            {isFrozen && (
+                                <div className="text-center mb-4">
+                                    <div className="text-4xl mb-2 animate-shake">🥶</div>
+                                    <div className="text-[#58a6ff] font-bold">FROZEN!</div>
+                                    <div className="text-[#8b949e] text-sm">
+                                        {Math.ceil((frozenUntil - Date.now()) / 1000)}s remaining
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {racingPhase === 'clicking' && !finishedRacers.includes(guestName) && !isFrozen && (
+                                <div className="text-center">
+                                    <div className="text-[#8b949e] text-sm mb-2">
+                                        Click {clickTarget[guestName] || 20} times!
+                                    </div>
+                                    <div className="text-2xl font-bold text-white mb-3">
+                                        {clickProgress[guestName] || 0} / {clickTarget[guestName] || 20}
+                                    </div>
+                                    <button
+                                        onTouchStart={handleRacingClick}
+                                        onClick={handleRacingClick}
+                                        className="w-full bg-[#238636] active:bg-[#2ea043] text-white font-bold py-12 rounded-lg text-2xl"
+                                    >
+                                        TAP! 👆
+                                    </button>
+                                </div>
+                            )}
+                            
+                            {racingPhase === 'minigame' && !finishedRacers.includes(guestName) && !isFrozen && (
+                                <div>
+                                    <div className="text-[#8b949e] text-sm mb-2 text-center">Mini Game</div>
+                                    
+                                    {miniGame.type === 'color' && (
+                                        <div className="text-center mb-4">
+                                            <div className="text-white mb-2">{miniGame.question}</div>
+                                            <div 
+                                                className="text-6xl font-bold mb-4"
+                                                style={{color: miniGame.color}}
+                                            >
+                                                {miniGame.text}
+                                            </div>
+                                        </div>
+                                    )}
+                                    
+                                    {miniGame.type !== 'color' && (
+                                        <div className="text-center text-xl font-bold text-white mb-4">
+                                            {miniGame.question}
+                                        </div>
+                                    )}
+                                    
+                                    {gameErrors > 0 && (
+                                        <div className="text-center text-[#f85149] text-sm mb-2 animate-shake">
+                                            Wrong! ({gameErrors}/3 errors)
+                                        </div>
+                                    )}
+                                    
+                                    <input
+                                        type="text"
+                                        value={gameAnswer}
+                                        onChange={(e) => setGameAnswer(e.target.value)}
+                                        onKeyPress={(e) => e.key === 'Enter' && submitAnswer()}
+                                        placeholder="Your answer..."
+                                        className="w-full bg-[#0d1117] border border-[#30363d] text-white rounded px-4 py-3 mb-3 focus:outline-none focus:border-[#58a6ff] text-center text-lg"
+                                        autoFocus
+                                    />
+                                    <button
+                                        onClick={submitAnswer}
+                                        className="w-full bg-[#238636] hover:bg-[#2ea043] text-white font-bold py-3 rounded transition"
+                                    >
+                                        Submit ✓
+                                    </button>
+                                </div>
+                            )}
+                            
+                            {(racingPhase === 'finished' || finishedRacers.includes(guestName)) && racingPhase !== 'gameover' && (
+                                <div className="text-center">
+                                    <div className="text-4xl mb-2">🏆</div>
+                                    <div className="text-[#238636] font-bold text-xl mb-2">You Finished!</div>
+                                    <div className="text-[#8b949e]">Rank #{finishedRacers.indexOf(guestName) + 1}</div>
+                                    <div className="text-white text-sm mt-3">Waiting for others...</div>
+                                </div>
+                            )}
+                            
+                            {racingPhase === 'gameover' && (
+                                <div>
+                                    <div className="text-center mb-4">
+                                        <div className="text-4xl mb-2">🏁</div>
+                                        <div className="text-white font-bold text-xl">Race Over!</div>
+                                    </div>
+                                    
+                                    <div className="space-y-2">
+                                        {leaderboard.map((entry, i) => (
+                                            <div 
+                                                key={i}
+                                                className={`p-3 rounded flex justify-between items-center ${
+                                                    entry.player === guestName
+                                                        ? 'bg-[#238636]/20 border-2 border-[#238636]'
+                                                        : 'bg-[#21262d] border border-[#30363d]'
+                                                }`}
+                                            >
+                                                <div className="flex items-center gap-2">
+                                                    <div className="text-2xl">
+                                                        {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
+                                                    </div>
+                                                    <div className="text-white font-semibold">{entry.player}</div>
+                                                </div>
+                                                <div className="text-[#58a6ff] font-bold">{entry.position}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    
+                                    <button
+                                        onClick={() => {
+                                            setIsRacing(false);
+                                            setRacingPhase('');
+                                        }}
+                                        className="w-full bg-[#238636] hover:bg-[#2ea043] text-white font-bold py-3 rounded mt-4 transition"
+                                    >
+                                        Back to Lobby
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            }
+            
+            // Main Lobby
+            return (
+                <div className="max-w-7xl mx-auto p-4">
+                    {/* Header */}
+                    <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-3 mb-4">
+                        <div className="flex flex-wrap justify-between items-center gap-2 text-sm">
+                            <div>
+                                <span className="text-[#8b949e]">Room:</span>
+                                <span className="text-white font-mono ml-1">{roomId}</span>
+                            </div>
+                            <div>
+                                <span className="text-[#8b949e]">You:</span>
+                                <span className="text-[#58a6ff] ml-1">{guestName}</span>
+                                {guestName === roomOwner && <span className="ml-1 text-xs bg-[#238636] text-white px-2 py-0.5 rounded">👑</span>}
+                            </div>
+                            <div>
+                                <span className="text-[#8b949e]">Players:</span>
+                                <span className="text-white ml-1">{players.length}/10</span>
+                            </div>
+                            {guestName === roomOwner && (
+                                <button
+                                    onClick={resetGame}
+                                    className="bg-[#da3633] hover:bg-[#f85149] text-white px-3 py-1 rounded transition text-xs font-semibold"
+                                >
+                                    Reset
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                    
+                    {/* Game Tabs */}
+                    <div className="grid grid-cols-4 gap-2 mb-4">
+                        {[
+                            {id: 'love', label: '💕', name: 'Love'},
+                            {id: 'fortune', label: '🥠', name: 'Cookie'},
+                            {id: 'dice', label: '🎲', name: 'Dice'},
+                            {id: 'racing', label: '🏁', name: 'Racing'}
+                        ].map(game => (
+                            <button
+                                key={game.id}
+                                onClick={() => setActiveGame(game.id)}
+                                className={`py-2 px-3 rounded font-semibold transition text-sm ${
+                                    activeGame === game.id 
+                                        ? 'bg-[#238636] text-white' 
+                                        : 'bg-[#21262d] text-[#8b949e] hover:bg-[#30363d]'
+                                }`}
+                            >
+                                {game.label} {game.name}
+                            </button>
+                        ))}
+                    </div>
+                    
+                    <div className="grid md:grid-cols-3 gap-4">
+                        {/* Game Area */}
+                        <div className="md:col-span-2">
+                            <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-4">
+                                {activeGame === 'love' && (
+                                    <div>
+                                        <h2 className="text-xl font-bold text-white mb-4">Love Calculator</h2>
+                                        <div className="space-y-3">
+                                            <input
+                                                type="text"
+                                                value={name1}
+                                                onChange={(e) => setName1(e.target.value)}
+                                                placeholder="Your name"
+                                                className="w-full bg-[#0d1117] border border-[#30363d] text-white rounded px-3 py-2 focus:outline-none focus:border-[#58a6ff]"
+                                            />
+                                            <input
+                                                type="text"
+                                                value={name2}
+                                                onChange={(e) => setName2(e.target.value)}
+                                                placeholder="Partner name"
+                                                className="w-full bg-[#0d1117] border border-[#30363d] text-white rounded px-3 py-2 focus:outline-none focus:border-[#58a6ff]"
+                                            />
+                                            <button
+                                                onClick={calculateLove}
+                                                className="w-full bg-[#238636] hover:bg-[#2ea043] text-white font-semibold py-2 px-4 rounded transition"
+                                            >
+                                                Calculate ❤️
+                                            </button>
+                                        </div>
+                                        
+                                        {showLoveResult && loveResult && (
+                                            <div className="mt-4 text-center animate-slideup">
+                                                <div className="text-5xl font-bold text-[#f85149] mb-2 animate-heartbeat">
+                                                    {loveResult.score}%
+                                                </div>
+                                                <p className="text-[#8b949e] text-sm">
+                                                    {loveResult.name1} 💕 {loveResult.name2}
+                                                </p>
+                                            </div>
+                                        )}
+                                        
+                                        {loveLog.length > 0 && (
+                                            <div className="mt-4">
+                                                <h3 className="text-white text-sm font-semibold mb-2">Match History</h3>
+                                                <div className="space-y-1 max-h-48 overflow-y-auto">
+                                                    {loveLog.map((log, i) => (
+                                                        <div key={i} className="bg-[#0d1117] border border-[#30363d] rounded p-2 text-xs">
+                                                            <span className="text-[#58a6ff]">{log.player}</span>
+                                                            <span className="text-[#8b949e]"> matched </span>
+                                                            <span className="text-white">{log.name1} & {log.name2}</span>
+                                                            <span className="text-[#f85149] font-bold ml-2">{log.score}%</span>
+                                                            <span className="text-[#8b949e] float-right">{log.time}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                
+                                {activeGame === 'fortune' && (
+                                    <div>
+                                        <h2 className="text-xl font-bold text-white mb-4">Fortune Cookie</h2>
+                                        <div className="text-center py-6">
+                                            <div 
+                                                onClick={crackCookie}
+                                                className={`text-7xl cursor-pointer inline-block select-none ${
+                                                    isCracking ? 'animate-crack' : 'animate-bounce hover:scale-110 transition'
+                                                }`}
+                                            >
+                                                🥠
+                                            </div>
+                                            <p className="text-[#8b949e] mt-3 text-sm">Tap to crack!</p>
+                                        </div>
+                                        
+                                        {showFortune && fortune && (
+                                            <div className={`p-4 rounded-lg border-2 animate-slideup ${
+                                                fortune.category === 'positive' 
+                                                    ? 'bg-[#238636]/10 border-[#238636]' 
+                                                    : fortune.category === 'negative'
+                                                    ? 'bg-[#f85149]/10 border-[#f85149]'
+                                                    : 'bg-[#d29922]/10 border-[#d29922]'
+                                            }`}>
+                                                <p className="text-white text-center">{fortune.fortune}</p>
+                                            </div>
+                                        )}
+                                        
+                                        {fortuneLog.length > 0 && (
+                                            <div className="mt-4">
+                                                <h3 className="text-white text-sm font-semibold mb-2">Fortune History</h3>
+                                                <div className="space-y-1 max-h-48 overflow-y-auto">
+                                                    {fortuneLog.map((log, i) => (
+                                                        <div key={i} className={`border rounded p-2 text-xs ${
+                                                            log.category === 'positive' ? 'bg-[#238636]/10 border-[#238636]' :
+                                                            log.category === 'negative' ? 'bg-[#f85149]/10 border-[#f85149]' :
+                                                            'bg-[#d29922]/10 border-[#d29922]'
+                                                        }`}>
+                                                            <div className="text-[#58a6ff] mb-1">{log.player}</div>
+                                                            <div className="text-white">{log.fortune}</div>
+                                                            <div className="text-[#8b949e] text-right mt-1">{log.time}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                
+                                {activeGame === 'dice' && (
+                                    <div>
+                                        <h2 className="text-xl font-bold text-white mb-4">Dice Roller</h2>
+                                        <div className="flex gap-3 mb-3">
+                                            <select
+                                                value={numDice}
+                                                onChange={(e) => setNumDice(e.target.value)}
+                                                className="flex-1 bg-[#0d1117] border border-[#30363d] text-white rounded px-3 py-2 text-sm"
+                                            >
+                                                {[1,2,3,4,5,6].map(n => (
+                                                    <option key={n} value={n}>{n} dice</option>
+                                                ))}
+                                            </select>
+                                            <select
+                                                value={diceSides}
+                                                onChange={(e) => setDiceSides(e.target.value)}
+                                                className="flex-1 bg-[#0d1117] border border-[#30363d] text-white rounded px-3 py-2 text-sm"
+                                            >
+                                                {[4,6,8,10,12,20].map(n => (
+                                                    <option key={n} value={n}>D{n}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        
+                                        <button
+                                            onClick={rollDice}
+                                            disabled={!canRoll}
+                                            className="w-full bg-[#238636] hover:bg-[#2ea043] disabled:opacity-50 text-white font-semibold py-2 px-4 rounded transition"
+                                        >
+                                            {canRoll ? 'Roll 🎲' : 'Rolling...'}
+                                        </button>
+                                        
+                                        {showDice && diceResults.length > 0 && (
+                                            <div className="mt-4">
+                                                <div className="flex gap-2 justify-center flex-wrap">
+                                                    {diceResults.map((roll, i) => (
+                                                        <div 
+                                                            key={i}
+                                                            className="w-14 h-14 bg-[#0d1117] border-2 border-[#58a6ff] rounded-lg flex items-center justify-center text-xl font-bold text-[#58a6ff] animate-diceroll"
+                                                        >
+                                                            {roll}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <p className="text-center text-[#238636] font-bold mt-3">
+                                                    Total: {diceResults.reduce((a, b) => a + b, 0)}
+                                                </p>
+                                            </div>
+                                        )}
+                                        
+                                        {activityLog.length > 0 && (
+                                            <div className="mt-4">
+                                                <h3 className="text-white text-sm font-semibold mb-2">Activity Log</h3>
+                                                <div className="space-y-1 max-h-48 overflow-y-auto">
+                                                    {activityLog.map((log, i) => (
+                                                        <div key={i} className="bg-[#0d1117] border border-[#30363d] rounded p-2 text-xs">
+                                                            <span className="text-[#58a6ff]">{log.player}</span>
+                                                            <span className="text-[#8b949e]"> rolled </span>
+                                                            <span className="text-white">[{log.rolls.join(', ')}]</span>
+                                                            <span className="text-[#238636] font-bold ml-2">{log.total}</span>
+                                                            <span className="text-[#8b949e] float-right">{log.time}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                
+                                {activeGame === 'racing' && (
+                                    <div>
+                                        <h2 className="text-xl font-bold text-white mb-4">🏁 Racing Mode</h2>
+                                        
+                                        {guestName === roomOwner ? (
+                                            <div>
+                                                <p className="text-[#8b949e] text-sm mb-4">
+                                                    Start a race with your friends! Fast-paced clicking + mini games.
+                                                </p>
+                                                
+                                                <div className="mb-4">
+                                                    <label className="text-white text-sm mb-2 block">Max Players (2-5)</label>
+                                                    <select
+                                                        value={maxPlayers}
+                                                        onChange={(e) => setMaxPlayers(parseInt(e.target.value))}
+                                                        className="w-full bg-[#0d1117] border border-[#30363d] text-white rounded px-3 py-2"
+                                                    >
+                                                        {[2,3,4,5].map(n => (
+                                                            <option key={n} value={n}>{n} Players</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                
+                                                <button
+                                                    onClick={startRacing}
+                                                    disabled={players.length < 2}
+                                                    className="w-full bg-[#238636] hover:bg-[#2ea043] disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded transition"
+                                                >
+                                                    {players.length < 2 ? 'Need 2+ Players' : 'Start Race 🏁'}
+                                                </button>
+                                                
+                                                <div className="mt-6 bg-[#0d1117] border border-[#30363d] rounded p-3">
+                                                    <h3 className="text-white font-semibold text-sm mb-2">How to Play:</h3>
+                                                    <ul className="text-[#8b949e] text-xs space-y-1">
+                                                        <li>🎯 Race to 150 points</li>
+                                                        <li>👆 Click rapidly to progress</li>
+                                                        <li>🎮 Solve mini games (math, typing, colors)</li>
+                                                        <li>⚠️ 3 wrong answers = -5 points penalty</li>
+                                                        <li>🏆 Top 3 get click bonuses next round</li>
+                                                        <li>🎁 1st place: 33% chance for items</li>
+                                                        <li>💣 Bomb: -8 points to target</li>
+                                                        <li>🚀 Boost: +5 points to self</li>
+                                                        <li>🕳️ Trap: Freeze target for 5 seconds</li>
+                                                    </ul>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="text-center py-8">
+                                                <div className="text-6xl mb-4 animate-bounce">🏁</div>
+                                                <p className="text-[#8b949e]">Waiting for room owner to start the race...</p>
+                                                <p className="text-white text-sm mt-2">Owner: {roomOwner}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        
+                        {/* Scoreboard */}
+                        <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-4">
+                            <h3 className="text-white font-semibold mb-3 text-sm">Scoreboard</h3>
+                            <div className="space-y-2">
+                                {players.map((player, i) => (
+                                    <div 
+                                        key={i}
+                                        className={`p-2 rounded flex justify-between items-center text-sm ${
+                                            player === guestName 
+                                                ? 'bg-[#238636]/20 border border-[#238636]' 
+                                                : 'bg-[#0d1117] border border-[#30363d]'
+                                        }`}
+                                    >
+                                        <span className="text-white">
+                                            {player}
+                                            {player === roomOwner && ' 👑'}
+                                        </span>
+                                        <span className="text-[#58a6ff] font-bold">
+                                            {scores[player] || 0}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+        
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+    {% endraw %}
+</body>
+</html> 
